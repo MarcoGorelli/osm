@@ -114,6 +114,27 @@ def filter(df):
     return df
 
 
+def keep_top_data(df, group_option):
+    top = (
+        df.group_by(group_option)
+        .agg(pl.col("data_sharing").sum())
+        .sort("data_sharing")
+        .tail(10)
+    )
+    if group_option == "funder":
+        # Special logic to ensure Howard Medical School always appears
+        df = df.filter(
+            pl.col("funder").is_in(
+                top["funder"].unique().to_list() + ["Howard Hughes Medical Institute"]
+            )
+        )
+    else:
+        df = df.join(top, on=group_option, how="semi").sort("year", "data_sharing")
+    df = df.sort("year", "data_sharing", descending=[True, True])
+
+    return df
+
+
 # Plotting logic
 if group_option is None:
     df = data
@@ -142,15 +163,9 @@ elif group_option == "journal":
         .agg(data_sharing=pl.col("is_open_data").sum())
         .sort("year")
     )
-    top = (
-        summary.group_by(group_option)
-        .agg(pl.col("data_sharing").last())
-        .sort("data_sharing")
-        .tail(10)
-    )
-    summary = summary.join(top, on=group_option, how="semi").sort(
-        "year", "data_sharing"
-    )
+
+    summary = keep_top_data(summary, group_option)
+
     fig = px.line(
         summary,
         x="year",
@@ -172,36 +187,14 @@ else:
         .agg(data_sharing=pl.col("is_open_data").sum())
         .sort(group_option, "year")
     )
-    top = (
-        summary.group_by(group_option)
-        .agg(pl.col("data_sharing").last())
-        .sort("data_sharing")
-        .tail(10)
-    )
+    summary = keep_top_data(summary, group_option)
 
-    if group_option == "funder":
-        summary = summary.filter(
-            pl.col("funder").is_in(
-                top["funder"].unique().to_list() + ["Howard Hughes Medical Institute"]
-            )
-        )
-    else:
-        summary = summary.filter(
-            pl.col(group_option).is_in(top[group_option].unique().to_list())
-        )
-
-    summary = summary.sort(pl.col("data_sharing").last().over(group_option))
     fig = px.line(
         summary,
         x="year",
         y="data_sharing",
         color=group_option,
         title=f"Open Data by {group_option.title()} Over Time",
-        category_orders={
-            group_option: summary[group_option]
-            .unique(maintain_order=True)
-            .to_list()[::-1]
-        },
     )
 
 st.plotly_chart(fig, use_container_width=True)
