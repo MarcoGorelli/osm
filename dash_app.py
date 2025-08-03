@@ -107,8 +107,13 @@ if group_option != "funder":
 else:
     funders = []
 
+max_year = data["year"].max()
+years = st.slider("Years", min_value=2000, max_value=max_year, value=(2000, max_year))
+
 
 def filter(df):
+    df = df.filter(pl.col("year").is_between(*years, closed="both"))
+
     if journals:
         df = df.filter(pl.col("journal").is_in(journals))
     if countries:
