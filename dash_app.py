@@ -4,7 +4,7 @@
 
 import os
 
-import plotly.express as px
+import plotly.express as px  # type: ignore[attr-defined]
 import polars as pl
 import psutil
 import streamlit as st
@@ -22,7 +22,7 @@ def get_memory_usage():
 # @st.cache_resource
 def load_data():
     return (
-        pl.scan_parquet("big_files/matches.parquet")
+        pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
         .select(
             "is_open_data",
             "is_open_code",
@@ -39,7 +39,7 @@ def load_data():
 @st.cache_resource
 def load_data_for_funder():
     return (
-        pl.scan_parquet("big_files/matches.parquet")
+        pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
         .select(
             "is_open_data",
             "is_open_code",
@@ -59,7 +59,7 @@ def load_data_for_funder():
 @st.cache_resource
 def load_data_for_country():
     return (
-        pl.scan_parquet("big_files/matches.parquet")
+        pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
         .select(
             "is_open_data",
             "is_open_code",
@@ -112,14 +112,16 @@ else:
     funders = []
 
 max_year = data["year"].max()
-years = st.slider("Years", min_value=2000, max_value=max_year, value=(2000, max_year))
+years: tuple[int, int] = st.slider(
+    "Years", min_value=2000, max_value=max_year, value=(2000, max_year)
+)  # type: ignore[assignment]
 
 
 formula = pl.col("is_open_data").sum()
 aggregation_name = "data_sharing"
 
 
-def filter(df):
+def filter(df: pl.DataFrame) -> pl.DataFrame:
     df = df.filter(pl.col("year").is_between(*years, closed="both"))
 
     if journals:
@@ -140,7 +142,7 @@ def filter(df):
     return df
 
 
-def keep_and_sort_top_data(df, group_option):
+def keep_and_sort_top_data(df: pl.DataFrame, group_option: str) -> pl.DataFrame:
     top = (
         df.group_by(group_option)
         .agg(pl.col(aggregation_name).sum())
@@ -168,7 +170,7 @@ if group_option is None:
     df = filter(df)
 
     summary = df.group_by("year").agg(formula.alias("open_data_count")).sort("year")
-    fig = px.line(
+    fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
         x="year",
         y="open_data_count",
@@ -184,7 +186,7 @@ elif group_option == "journal":
 
     summary = keep_and_sort_top_data(summary, group_option)
 
-    fig = px.line(
+    fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
         x="year",
         y=aggregation_name,
@@ -206,7 +208,7 @@ else:
     )
     summary = keep_and_sort_top_data(summary, group_option)
 
-    fig = px.line(
+    fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
         x="year",
         y=aggregation_name,
@@ -214,7 +216,7 @@ else:
         title=f"Open Data by {group_option.title()} Over Time",
     )
 
-st.plotly_chart(fig, use_container_width=True)
+st.plotly_chart(fig, use_container_width=True)  # pyright: ignore[reportUnknownMemberType]
 
 mem_usage = get_memory_usage()
 st.write(f"**Memory usage:** {mem_usage:.2f} MB")
