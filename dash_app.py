@@ -114,16 +114,16 @@ def filter(df):
     if countries:
         df = df.filter(
             pl.any_horizontal(
-                [pl.col("affiliation_country").str.contains(x) for x in countries]
+                [
+                    pl.col("affiliation_country").str.split("; ").list.contains(x)
+                    for x in countries
+                ]
             )
         )
     if funders:
-        if df.schema["funder"] == pl.List:
-            df = df.filter(
-                pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
-            )
-        else:
-            df = df.filter(pl.col("funder").is_in(funders))
+        df = df.filter(
+            pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
+        )
     return df
 
 
