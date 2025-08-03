@@ -87,7 +87,7 @@ group_option = st.selectbox(
     index=3,
 )
 
-if group_option != "journals":
+if group_option != "journal":
     unique_journals = data["journal"].unique(maintain_order=True).to_list()
     journals = st.multiselect("Journal", options=unique_journals)
 else:
@@ -101,6 +101,12 @@ if group_option != "affiliation_country":
 else:
     countries = []
 
+if group_option != "funder":
+    unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
+    funders = st.multiselect("Funder", options=unique_funders)
+else:
+    funders = []
+
 
 def filter(df):
     if journals:
@@ -111,10 +117,17 @@ def filter(df):
                 [pl.col("affiliation_country").str.contains(x) for x in countries]
             )
         )
+    if funders:
+        if df.schema["funder"] == pl.List:
+            df = df.filter(
+                pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
+            )
+        else:
+            df = df.filter(pl.col("funder").is_in(funders))
     return df
 
 
-def keep_top_data(df, group_option):
+def keep_and_sort_top_data(df, group_option):
     top = (
         df.group_by(group_option)
         .agg(pl.col("data_sharing").sum())
@@ -158,13 +171,11 @@ elif group_option == "journal":
 
     df = filter(df)
 
-    summary = (
-        df.group_by(group_option, "year")
-        .agg(data_sharing=pl.col("is_open_data").sum())
-        .sort("year")
+    summary = df.group_by(group_option, "year").agg(
+        data_sharing=pl.col("is_open_data").sum()
     )
 
-    summary = keep_top_data(summary, group_option)
+    summary = keep_and_sort_top_data(summary, group_option)
 
     fig = px.line(
         summary,
@@ -185,9 +196,8 @@ else:
         df.select("is_open_data", "year", group_option)
         .group_by(group_option, "year")
         .agg(data_sharing=pl.col("is_open_data").sum())
-        .sort(group_option, "year")
     )
-    summary = keep_top_data(summary, group_option)
+    summary = keep_and_sort_top_data(summary, group_option)
 
     fig = px.line(
         summary,
