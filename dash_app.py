@@ -1,3 +1,7 @@
+# What's missing:
+# - select the metric
+# -
+
 import os
 
 import plotly.express as px
@@ -111,6 +115,10 @@ max_year = data["year"].max()
 years = st.slider("Years", min_value=2000, max_value=max_year, value=(2000, max_year))
 
 
+formula = pl.col("is_open_data").sum()
+aggregation_name = "data_sharing"
+
+
 def filter(df):
     df = df.filter(pl.col("year").is_between(*years, closed="both"))
 
@@ -135,8 +143,8 @@ def filter(df):
 def keep_and_sort_top_data(df, group_option):
     top = (
         df.group_by(group_option)
-        .agg(pl.col("data_sharing").sum())
-        .sort("data_sharing")
+        .agg(pl.col(aggregation_name).sum())
+        .sort(aggregation_name)
         .tail(10)
     )
     if group_option == "funder":
@@ -147,8 +155,8 @@ def keep_and_sort_top_data(df, group_option):
             )
         )
     else:
-        df = df.join(top, on=group_option, how="semi").sort("year", "data_sharing")
-    df = df.sort("year", "data_sharing", descending=[True, True])
+        df = df.join(top, on=group_option, how="semi").sort("year", aggregation_name)
+    df = df.sort("year", aggregation_name, descending=[True, True])
 
     return df
 
@@ -159,11 +167,7 @@ if group_option is None:
 
     df = filter(df)
 
-    summary = (
-        df.group_by("year")
-        .agg(pl.col("is_open_data").sum().alias("open_data_count"))
-        .sort("year")
-    )
+    summary = df.group_by("year").agg(formula.alias("open_data_count")).sort("year")
     fig = px.line(
         summary,
         x="year",
@@ -176,16 +180,14 @@ elif group_option == "journal":
 
     df = filter(df)
 
-    summary = df.group_by(group_option, "year").agg(
-        data_sharing=pl.col("is_open_data").sum()
-    )
+    summary = df.group_by(group_option, "year").agg(formula.alias(aggregation_name))
 
     summary = keep_and_sort_top_data(summary, group_option)
 
     fig = px.line(
         summary,
         x="year",
-        y="data_sharing",
+        y=aggregation_name,
         color=group_option,
         title=f"Open Data by {group_option.title()} Over Time",
     )
@@ -200,14 +202,14 @@ else:
     summary = (
         df.select("is_open_data", "year", group_option)
         .group_by(group_option, "year")
-        .agg(data_sharing=pl.col("is_open_data").sum())
+        .agg(formula.alias(aggregation_name))
     )
     summary = keep_and_sort_top_data(summary, group_option)
 
     fig = px.line(
         summary,
         x="year",
-        y="data_sharing",
+        y=aggregation_name,
         color=group_option,
         title=f"Open Data by {group_option.title()} Over Time",
     )
