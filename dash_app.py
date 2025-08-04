@@ -1,12 +1,25 @@
+"""Usage:
+
+    streamlit run streamlit_app.py
+
+Make sure you have Streamlit, Polars, and Plotly installed. Current versions:
+
+- Streamlit: 1.47.1
+- Polars: 1.32.0
+- Plotly: 6.2.0
+"""
+
 import plotly.express as px  # type: ignore[attr-defined]
 import polars as pl
 import streamlit as st
 
 st.set_page_config(layout="wide")
 
+MIN_YEAR = 2000
+
 
 @st.cache_resource
-def load_data():
+def load_data() -> pl.DataFrame:
     return (
         pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
         .select(
@@ -17,13 +30,13 @@ def load_data():
             "funder",
             "year",
         )
-        .filter(pl.col("year") >= 2000)
+        .filter(pl.col("year") >= MIN_YEAR)
         .collect()
     )
 
 
 @st.cache_resource
-def load_data_for_funder():
+def load_data_for_funder() -> pl.DataFrame:
     return (
         pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
         .select(
@@ -34,7 +47,7 @@ def load_data_for_funder():
             "funder",
             "year",
         )
-        .filter(pl.col("year") >= 2000)
+        .filter(pl.col("year") >= MIN_YEAR)
         .with_columns(pl.col("funder").list.unique())
         .explode("funder")
         .filter(pl.col("funder").str.len_chars() > 0, pl.col("funder").is_not_null())
@@ -43,7 +56,7 @@ def load_data_for_funder():
 
 
 @st.cache_resource
-def load_data_for_country():
+def load_data_for_country() -> pl.DataFrame:
     return (
         pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
         .select(
@@ -54,7 +67,7 @@ def load_data_for_country():
             "funder",
             "year",
         )
-        .filter(pl.col("year") >= 2000, pl.col("affiliation_country").is_not_null())
+        .filter(pl.col("year") >= MIN_YEAR, pl.col("affiliation_country").is_not_null())
         .with_columns(pl.col("affiliation_country").str.split("; ").list.unique())
         .explode("affiliation_country")
         .filter(
@@ -103,22 +116,33 @@ if splitting_variable == "affiliation_country":
 else:
     default_countries = []
 countries = st.multiselect(
-    "Country", options=unique_countries, default=default_countries
+    "Country",
+    options=unique_countries,
+    default=default_countries,
 )
 
 unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
 if splitting_variable == "funder":
     # Ensure that Howard Hughes Medical Institute always appears.
-    default_funders = data_for_funder.group_by("funder").len().select(
-        pl.col("funder").top_k_by("len", 9)
-    )["funder"].to_list() + ["Howard Hughes Medical Institute"]
+    default_funders: list[str] = [
+        *data_for_funder.group_by("funder")
+        .len()
+        .select(
+            pl.col("funder").top_k_by("len", 9),
+        )["funder"]
+        .to_list(),
+        "Howard Hughes Medical Institute",
+    ]
 else:
     default_funders = []
 funders = st.multiselect("Funder", options=unique_funders, default=default_funders)
 
 max_year: int = data["year"].max()  # type: ignore[assignment]
 years: tuple[int, int] = st.slider(  # type: ignore[assignment]
-    "Years", min_value=2000, max_value=max_year, value=(2000, max_year)
+    "Years",
+    min_value=MIN_YEAR,
+    max_value=max_year,
+    value=(MIN_YEAR, max_year),
 )
 
 aggregation_name = st.selectbox(
@@ -142,9 +166,8 @@ FORMULAE = {
 formula = FORMULAE[aggregation_name]
 
 
-def filter(df: pl.DataFrame) -> pl.DataFrame:
+def apply_filters(df: pl.DataFrame) -> pl.DataFrame:
     df = df.filter(pl.col("year").is_between(*years, closed="both"))
-
     if journals:
         df = df.filter(pl.col("journal").is_in(journals))
     if countries:
@@ -157,8 +180,8 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
                     [
                         pl.col("affiliation_country").str.split("; ").list.contains(x)
                         for x in countries
-                    ]
-                )
+                    ],
+                ),
             )
     if funders:
         if splitting_variable == "funder":
@@ -166,13 +189,13 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
             df = df.filter(pl.col("funder").is_in(funders))
         else:
             df = df.filter(
-                pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
+                pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders]),
             )
     return df
 
 
 if splitting_variable is None:
-    df = filter(data)
+    df = apply_filters(data)
     summary = df.group_by("year").agg(formula.alias(aggregation_name)).sort("year")
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
@@ -182,7 +205,7 @@ if splitting_variable is None:
     )
 
 elif splitting_variable == "journal":
-    df = filter(data)
+    df = apply_filters(data)
     summary = (
         df.group_by(splitting_variable, "year")
         .agg(formula.alias(aggregation_name))
@@ -196,11 +219,8 @@ elif splitting_variable == "journal":
         title=f"Open Data by {splitting_variable.title()} Over Time",
     )
 else:
-    if splitting_variable == "funder":
-        df = data_for_funder
-    else:
-        df = data_for_country
-    df = filter(df)
+    df = data_for_funder if splitting_variable == "funder" else data_for_country
+    df = apply_filters(df)
     summary = (
         df.select("is_open_data", "year", "is_open_code", splitting_variable)
         .group_by(splitting_variable, "year")
