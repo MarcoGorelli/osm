@@ -90,34 +90,48 @@ data_for_funder = load_data_for_funder()
 group_option = st.selectbox(
     "Splitting variable",
     options=[None, "journal", "affiliation_country", "funder"],
-    index=3,
+    index=3,  # default to 'funder'
 )
 
-if group_option != "journal":
-    unique_journals = data["journal"].unique(maintain_order=True).to_list()
-    journals = st.multiselect("Journal", options=unique_journals)
-else:
-    journals = []
-
-if group_option != "affiliation_country":
-    unique_countries = (
-        data_for_country["affiliation_country"].unique(maintain_order=True).to_list()
-    )
-    countries = st.multiselect("Country", options=unique_countries)
-else:
-    countries = []
-
-unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
-if group_option == "funder":
-    default = (
-        data_for_funder.group_by("funder")
+unique_journals = data["journal"].unique(maintain_order=True).to_list()
+if group_option == "journal":
+    default_journals = (
+        data.group_by("journal")
         .len()
-        .select(pl.col("funder").top_k_by("len", 10))["funder"]
+        .select(pl.col("journal").top_k_by("len", 10))["journal"]
         .to_list()
     )
 else:
-    default = []
-funders = st.multiselect("Funder", options=unique_funders, default=default)
+    default_journals = []
+journals = st.multiselect("Journal", options=unique_journals, default=default_journals)
+
+unique_countries = (
+    data_for_country["affiliation_country"].unique(maintain_order=True).to_list()
+)
+if group_option == "affiliation_country":
+    default_countries = (
+        data_for_country.group_by("affiliation_country")
+        .len()
+        .select(pl.col("affiliation_country").top_k_by("len", 10))[
+            "affiliation_country"
+        ]
+        .to_list()
+    )
+else:
+    default_countries = []
+countries = st.multiselect(
+    "Country", options=unique_countries, default=default_countries
+)
+
+unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
+if group_option == "funder":
+    # Ensure that Howard Hughes Medical Institute always appears.
+    default_funders = data_for_funder.group_by("funder").len().select(
+        pl.col("funder").top_k_by("len", 9)
+    )["funder"].to_list() + ["Howard Hughes Medical Institute"]
+else:
+    default_funders = []
+funders = st.multiselect("Funder", options=unique_funders, default=default_funders)
 
 max_year: int = data["year"].max()  # type: ignore[assignment]
 years: tuple[int, int] = st.slider(  # type: ignore[assignment]
@@ -151,14 +165,17 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
     if journals:
         df = df.filter(pl.col("journal").is_in(journals))
     if countries:
-        df = df.filter(
-            pl.any_horizontal(
-                [
-                    pl.col("affiliation_country").str.split("; ").list.contains(x)
-                    for x in countries
-                ]
+        if group_option == "affiliation_country":
+            df = df.filter(pl.col("affiliation_country").is_in(countries))
+        else:
+            df = df.filter(
+                pl.any_horizontal(
+                    [
+                        pl.col("affiliation_country").str.split("; ").list.contains(x)
+                        for x in countries
+                    ]
+                )
             )
-        )
     if funders:
         if group_option == "funder":
             df = df.filter(pl.col("funder").is_in(funders))
@@ -166,27 +183,6 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
             df = df.filter(
                 pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
             )
-    return df
-
-
-def keep_and_sort_top_data(df: pl.DataFrame, group_option: str) -> pl.DataFrame:
-    top = (
-        df.group_by(group_option)
-        .agg(pl.col(aggregation_name).last())
-        .sort(aggregation_name)
-        .tail(20)
-    )
-    if group_option == "funder":
-        # Special logic to ensure Howard Medical School always appears
-        df = df.filter(
-            pl.col("funder").is_in(
-                top["funder"].unique().to_list() + ["Howard Hughes Medical Institute"]
-            )
-        )
-    else:
-        df = df.join(top, on=group_option, how="semi").sort("year", aggregation_name)
-    df = df.sort("year", group_option)
-
     return df
 
 
@@ -209,9 +205,11 @@ elif group_option == "journal":
 
     df = filter(df)
 
-    summary = df.group_by(group_option, "year").agg(formula.alias(aggregation_name))
-
-    summary = keep_and_sort_top_data(summary, group_option)
+    summary = (
+        df.group_by(group_option, "year")
+        .agg(formula.alias(aggregation_name))
+        .sort("year", group_option)
+    )
 
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
@@ -229,11 +227,11 @@ else:
     df = filter(df)
 
     summary = (
-        df.select("is_open_data", "year", group_option)
+        df.select("is_open_data", "year", "is_open_code", group_option)
         .group_by(group_option, "year")
         .agg(formula.alias(aggregation_name))
+        .sort("year", group_option)
     )
-    summary = keep_and_sort_top_data(summary, group_option)
 
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
