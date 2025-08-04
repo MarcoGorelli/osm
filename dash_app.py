@@ -1,27 +1,11 @@
-# What's missing:
-# - [x] select the metric.
-# - [ ] sort out pre-filtering logic.
-# first, check the data for percentage is correct
-# then, sort out the filter.
-
-import os
-
 import plotly.express as px  # type: ignore[attr-defined]
 import polars as pl
-import psutil
 import streamlit as st
 
 st.set_page_config(layout="wide")
 
 
-def get_memory_usage():
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    return mem_info.rss / (1024**2)  # RSS in MB
-
-
-# Load the data
-# @st.cache_resource
+@st.cache_resource
 def load_data():
     return (
         pl.scan_parquet("big_files/matches.parquet")  # pyright: ignore[reportUnknownMemberType]
@@ -86,15 +70,14 @@ data_for_country = load_data_for_country()
 data_for_funder = load_data_for_funder()
 
 
-# Dropdown selection
-group_option = st.selectbox(
+splitting_variable = st.selectbox(
     "Splitting variable",
     options=[None, "journal", "affiliation_country", "funder"],
     index=3,  # default to 'funder'
 )
 
 unique_journals = data["journal"].unique(maintain_order=True).to_list()
-if group_option == "journal":
+if splitting_variable == "journal":
     default_journals = (
         data.group_by("journal")
         .len()
@@ -108,7 +91,7 @@ journals = st.multiselect("Journal", options=unique_journals, default=default_jo
 unique_countries = (
     data_for_country["affiliation_country"].unique(maintain_order=True).to_list()
 )
-if group_option == "affiliation_country":
+if splitting_variable == "affiliation_country":
     default_countries = (
         data_for_country.group_by("affiliation_country")
         .len()
@@ -124,7 +107,7 @@ countries = st.multiselect(
 )
 
 unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
-if group_option == "funder":
+if splitting_variable == "funder":
     # Ensure that Howard Hughes Medical Institute always appears.
     default_funders = data_for_funder.group_by("funder").len().select(
         pl.col("funder").top_k_by("len", 9)
@@ -165,7 +148,8 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
     if journals:
         df = df.filter(pl.col("journal").is_in(journals))
     if countries:
-        if group_option == "affiliation_country":
+        if splitting_variable == "affiliation_country":
+            # 'affiliation_country' has already been preprocessed, so we can just use `is_in`.
             df = df.filter(pl.col("affiliation_country").is_in(countries))
         else:
             df = df.filter(
@@ -177,7 +161,8 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
                 )
             )
     if funders:
-        if group_option == "funder":
+        if splitting_variable == "funder":
+            # 'funder' has already been preprocessed, so we can just use `is_in`.
             df = df.filter(pl.col("funder").is_in(funders))
         else:
             df = df.filter(
@@ -186,12 +171,8 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
     return df
 
 
-# Plotting logic
-if group_option is None:
-    df = data
-
-    df = filter(df)
-
+if splitting_variable is None:
+    df = filter(data)
     summary = df.group_by("year").agg(formula.alias(aggregation_name)).sort("year")
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
@@ -200,48 +181,40 @@ if group_option is None:
         title="Open Data Over Time",
     )
 
-elif group_option == "journal":
-    df = data
-
-    df = filter(df)
-
+elif splitting_variable == "journal":
+    df = filter(data)
     summary = (
-        df.group_by(group_option, "year")
+        df.group_by(splitting_variable, "year")
         .agg(formula.alias(aggregation_name))
-        .sort("year", group_option)
+        .sort("year", splitting_variable)
     )
-
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
         x="year",
         y=aggregation_name,
-        color=group_option,
-        title=f"Open Data by {group_option.title()} Over Time",
+        color=splitting_variable,
+        title=f"Open Data by {splitting_variable.title()} Over Time",
     )
 else:
-    if group_option == "funder":
+    if splitting_variable == "funder":
         df = data_for_funder
     else:
         df = data_for_country
-
     df = filter(df)
-
     summary = (
-        df.select("is_open_data", "year", "is_open_code", group_option)
-        .group_by(group_option, "year")
+        df.select("is_open_data", "year", "is_open_code", splitting_variable)
+        .group_by(splitting_variable, "year")
         .agg(formula.alias(aggregation_name))
-        .sort("year", group_option)
+        .sort("year", splitting_variable)
     )
-
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
         x="year",
         y=aggregation_name,
-        color=group_option,
-        title=f"Open Data by {group_option.title()} Over Time",
+        color=splitting_variable,
+        title=f"Open Data by {splitting_variable.title()} Over Time",
     )
 
+fig.update_layout(hovermode="x unified")  # pyright: ignore[reportUnknownMemberType]
+fig.update_traces(hovertemplate="%{y}")  # pyright: ignore[reportUnknownMemberType]
 st.plotly_chart(fig, use_container_width=True)  # pyright: ignore[reportUnknownMemberType]
-
-mem_usage = get_memory_usage()
-st.write(f"**Memory usage:** {mem_usage:.2f} MB")
