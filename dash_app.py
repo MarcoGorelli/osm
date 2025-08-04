@@ -1,6 +1,8 @@
 # What's missing:
-# - select the metric
-# -
+# - [x] select the metric.
+# - [ ] sort out pre-filtering logic.
+# first, check the data for percentage is correct
+# then, sort out the filter.
 
 import os
 
@@ -105,20 +107,42 @@ if group_option != "affiliation_country":
 else:
     countries = []
 
-if group_option != "funder":
-    unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
-    funders = st.multiselect("Funder", options=unique_funders)
+unique_funders = data_for_funder["funder"].unique(maintain_order=True).to_list()
+if group_option == "funder":
+    default = (
+        data_for_funder.group_by("funder")
+        .len()
+        .select(pl.col("funder").top_k_by("len", 10))["funder"]
+        .to_list()
+    )
 else:
-    funders = []
+    default = []
+funders = st.multiselect("Funder", options=unique_funders, default=default)
 
-max_year = data["year"].max()
-years: tuple[int, int] = st.slider(
+max_year: int = data["year"].max()  # type: ignore[assignment]
+years: tuple[int, int] = st.slider(  # type: ignore[assignment]
     "Years", min_value=2000, max_value=max_year, value=(2000, max_year)
-)  # type: ignore[assignment]
+)
 
+aggregation_name = st.selectbox(
+    "Aggregation",
+    options=[
+        "data_sharing_percent",
+        "data_sharing",
+        "count",
+        "code_sharing_percent",
+        "code_sharing",
+    ],
+)
 
-formula = pl.col("is_open_data").sum()
-aggregation_name = "data_sharing"
+FORMULAE = {
+    "data_sharing_percent": pl.col("is_open_data").mean() * 100,
+    "data_sharing": pl.col("is_open_data").sum(),
+    "count": pl.col("is_open_data").len(),
+    "code_sharing_percent": pl.col("is_open_code").mean() * 100,
+    "code_sharing": pl.col("is_open_code").sum(),
+}
+formula = FORMULAE[aggregation_name]
 
 
 def filter(df: pl.DataFrame) -> pl.DataFrame:
@@ -136,18 +160,21 @@ def filter(df: pl.DataFrame) -> pl.DataFrame:
             )
         )
     if funders:
-        df = df.filter(
-            pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
-        )
+        if group_option == "funder":
+            df = df.filter(pl.col("funder").is_in(funders))
+        else:
+            df = df.filter(
+                pl.any_horizontal([pl.col("funder").list.contains(x) for x in funders])
+            )
     return df
 
 
 def keep_and_sort_top_data(df: pl.DataFrame, group_option: str) -> pl.DataFrame:
     top = (
         df.group_by(group_option)
-        .agg(pl.col(aggregation_name).sum())
+        .agg(pl.col(aggregation_name).last())
         .sort(aggregation_name)
-        .tail(10)
+        .tail(20)
     )
     if group_option == "funder":
         # Special logic to ensure Howard Medical School always appears
@@ -158,7 +185,7 @@ def keep_and_sort_top_data(df: pl.DataFrame, group_option: str) -> pl.DataFrame:
         )
     else:
         df = df.join(top, on=group_option, how="semi").sort("year", aggregation_name)
-    df = df.sort("year", aggregation_name, descending=[True, True])
+    df = df.sort("year", group_option)
 
     return df
 
@@ -169,11 +196,11 @@ if group_option is None:
 
     df = filter(df)
 
-    summary = df.group_by("year").agg(formula.alias("open_data_count")).sort("year")
+    summary = df.group_by("year").agg(formula.alias(aggregation_name)).sort("year")
     fig = px.line(  # pyright: ignore[reportUnknownMemberType]
         summary,
         x="year",
-        y="open_data_count",
+        y=aggregation_name,
         title="Open Data Over Time",
     )
 
